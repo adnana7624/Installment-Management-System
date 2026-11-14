@@ -14,8 +14,8 @@ const router = express.Router();
 
 router.post("/create", protect, createExpense);
 router.get("/getAll", protect, getAllExpenses);
-router.get("/getSingle:id", protect, getSingleExpense);
-router.put("/update:id", protect, updateExpense);
-router.delete("/delete:id", protect, deleteExpense);
+router.get("/getSingle/:id", protect, getSingleExpense);
+router.put("/update/:id", protect, updateExpense);
+router.delete("/delete/:id", protect, deleteExpense);
 
 export default router;

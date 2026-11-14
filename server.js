@@ -7,6 +7,8 @@ import authRoutes from "./src/routes/authRoutes.js";
 import installmentRoutes from "./src/routes/installmentRoutes.js"
 import paymentRoutes from "./src/routes/paymentRoutes.js";
 import expenseRoutes from "./src/routes/expenseRoutes.js";
+import dashboardRoutes from "./src/routes/dashboardRoutes.js";
+import reportRoutes from "./src/routes/reportRoutes.js";
 
 
 dotenv.config();
@@ -19,6 +21,8 @@ app.use("/api/v1/auth" , authRoutes)
 app.use("/api/v1/installments",installmentRoutes)
 app.use("/api/v1/payments",paymentRoutes);
 app.use("/api/v1/expenses",expenseRoutes);
+app.use("/api/v1/dashboard",dashboardRoutes);
+app.use("/api/v1/reports",reportRoutes);
 
 app.get("/",(req , res) =>{
     return res.status(200).json({

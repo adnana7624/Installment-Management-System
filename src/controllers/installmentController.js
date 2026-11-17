@@ -548,3 +548,235 @@ export const receivePayment = async (req, res) => {
     }
 };
 
+
+export const updateInstallment = async (req, res) => {
+    let session;
+
+    try {
+        const { id } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid installment ID"
+            });
+        }
+
+        session = await mongoose.startSession();
+
+        let result;
+
+        await session.withTransaction(async () => {
+
+            // 1. Find existing installment
+            const installment = await Installment.findById(id)
+                .session(session);
+
+            if (!installment) {
+                const error = new Error("Installment account not found");
+                error.statusCode = 404;
+                throw error;
+            }
+
+            if (installment.status === "cancelled") {
+                const error = new Error(
+                    "Cancelled accounts cannot be edited"
+                );
+                error.statusCode = 400;
+                throw error;
+            }
+
+            // 2. Find existing customer
+            const customer = await Customer.findById(
+                installment.customer
+            ).session(session);
+
+            if (!customer) {
+                const error = new Error("Customer not found");
+                error.statusCode = 404;
+                throw error;
+            }
+
+            // 3. Merge existing data with provided fields
+            const updatedCustomer = {
+                customerName: req.body.customerName !== undefined
+                    ? req.body.customerName
+                    : customer.customerName,
+
+                cnic: req.body.cnic !== undefined
+                    ? String(req.body.cnic).replace(/-/g, "").trim()
+                    : customer.cnic,
+
+                fatherName: req.body.fatherName !== undefined
+                    ? req.body.fatherName
+                    : customer.fatherName,
+
+                contactNumber: req.body.contactNumber !== undefined
+                    ? req.body.contactNumber
+                    : customer.contactNumber
+            };
+
+            const updatedAccount = {
+                productName: req.body.productName !== undefined
+                    ? req.body.productName
+                    : installment.productName,
+
+                dealerRate: req.body.dealerRate !== undefined
+                    ? Number(req.body.dealerRate)
+                    : installment.dealerRate,
+
+                actualRate: req.body.actualRate !== undefined
+                    ? Number(req.body.actualRate)
+                    : installment.actualRate,
+
+                percentage: req.body.percentage !== undefined
+                    ? Number(req.body.percentage)
+                    : installment.percentage,
+
+                purchaseDate: req.body.purchaseDate !== undefined
+                    ? new Date(req.body.purchaseDate)
+                    : installment.purchaseDate
+            };
+
+            // 4. Validate customer fields
+            if (
+                typeof updatedCustomer.customerName !== "string" ||
+                !updatedCustomer.customerName.trim() ||
+                typeof updatedCustomer.fatherName !== "string" ||
+                !updatedCustomer.fatherName.trim() ||
+                typeof updatedCustomer.contactNumber !== "string" ||
+                !updatedCustomer.contactNumber.trim()
+            ) {
+                const error = new Error("Please provide valid customer details");
+                error.statusCode = 400;
+                throw error;
+            }
+
+            if (!/^\d{13}$/.test(updatedCustomer.cnic)) {
+                const error = new Error(
+                    "CNIC must contain exactly 13 digits"
+                );
+                error.statusCode = 400;
+                throw error;
+            }
+
+            // 5. Validate numeric fields
+            if (
+                !Number.isFinite(updatedAccount.dealerRate) ||
+                !Number.isFinite(updatedAccount.actualRate) ||
+                !Number.isFinite(updatedAccount.percentage) ||
+                updatedAccount.dealerRate < 0 ||
+                updatedAccount.actualRate <= 0 ||
+                updatedAccount.percentage < 0
+            ) {
+                const error = new Error("Please provide valid amounts and percentage");
+                error.statusCode = 400;
+                throw error;
+            }
+
+            // 6. Validate product and date
+            if (
+                typeof updatedAccount.productName !== "string" ||
+                !updatedAccount.productName.trim() ||
+                Number.isNaN(updatedAccount.purchaseDate.getTime())
+            ) {
+                const error = new Error("Please provide valid product name and purchase date");
+                error.statusCode = 400;
+                throw error;
+            }
+
+            // 7. Check duplicate CNIC
+            const duplicateCustomer = await Customer.findOne({
+                cnic: updatedCustomer.cnic,
+                _id: { $ne: customer._id }
+            }).session(session);
+
+            if (duplicateCustomer) {
+                const error = new Error(
+                    "Another customer already exists with this CNIC"
+                );
+                error.statusCode = 409;
+                throw error;
+            }
+
+            // 8. Calculate updated price
+            const percentageAmount = Number(
+                (
+                    updatedAccount.actualRate *
+                    updatedAccount.percentage / 100
+                ).toFixed(2)
+            );
+
+            const finalPrice = Number(
+                (
+                    updatedAccount.actualRate +
+                    percentageAmount
+                ).toFixed(2)
+            );
+
+            // Preserve existing payments
+            if (finalPrice < installment.totalPaid) {
+                const error = new Error(
+                    "Final customer price cannot be less than the amount already paid"
+                );
+                error.statusCode = 400;
+                throw error;
+            }
+
+            const remainingAmount = Number(
+                (finalPrice - installment.totalPaid).toFixed(2)
+            );
+
+            // 9. Update customer
+            Object.assign(customer, {
+                ...updatedCustomer,
+                customerName: updatedCustomer.customerName.trim(),
+                fatherName: updatedCustomer.fatherName.trim(),
+                contactNumber: updatedCustomer.contactNumber.trim()
+            });
+
+            await customer.save({ session });
+
+            // 10. Update installment
+            Object.assign(installment, {
+                ...updatedAccount,
+                productName: updatedAccount.productName.trim(),
+                percentageAmount,
+                finalPrice,
+                remainingAmount,
+                status: remainingAmount === 0
+                    ? "completed"
+                    : "active"
+            });
+
+            await installment.save({ session });
+
+            result = {
+                installment,
+                customer
+            };
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Installment account updated successfully",
+            data: result
+        });
+
+    } catch (error) {
+        console.error("Update installment error:", error);
+
+        return res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.statusCode
+                ? error.message
+                : "Failed to update installment account"
+        });
+
+    } finally {
+        if (session) {
+            await session.endSession();
+        }
+    }
+};
+

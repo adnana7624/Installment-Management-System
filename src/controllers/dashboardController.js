@@ -107,6 +107,9 @@ export const getDashboard = async (req, res) => {
                     totalCollected,
                     remainingBalance: accounts.remainingBalance
                 },
+                investment: {
+                    totalInvestment: accounts.totalActualCost
+                },
                 expenses: {
                     totalExpenses
                 },

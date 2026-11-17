@@ -17,7 +17,9 @@ import backupRoutes from "./src/routes/backupRoutes.js";
 dotenv.config();
 
 const app = express();
-
+app.use(cors({
+    origin: "http://localhost:5173"
+}));
 app.use(express.json());
 
 app.use("/api/v1/auth" , authRoutes)

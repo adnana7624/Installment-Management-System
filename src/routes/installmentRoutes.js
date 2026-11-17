@@ -1,6 +1,6 @@
 
 import express from "express";
-import { createInstallment , getAllInstallments, getSingleInstallment, receivePayment } from "../controllers/installmentController.js";
+import { createInstallment , getAllInstallments, getSingleInstallment, receivePayment, updateInstallment } from "../controllers/installmentController.js";
 import { protect } from "../middleware/authMiddleware.js";
 
 
@@ -15,5 +15,9 @@ router.get("/single/:id",protect , getSingleInstallment);
 
 // payment api
 router.post("/payment/:id",protect,receivePayment);
+
+// update api
+router.put("/update/:id",protect , updateInstallment);
+
 
 export default router;

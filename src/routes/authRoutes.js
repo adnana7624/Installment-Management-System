@@ -1,13 +1,22 @@
+
 import express from "express";
 
-import { loginAdmin } from "../controllers/authController.js";
-
-const router = express.Router();
-
-router.post("/login",loginAdmin);
+import {
+    loginAdmin,
+    changePassword
+} from "../controllers/authController.js";
 
 import { protect } from "../middleware/authMiddleware.js";
 
+const router = express.Router();
+
+// Admin login
+router.post("/login", loginAdmin);
+
+// Change password (protected)
+router.put("/change-password", protect, changePassword);
+
+// Protected profile
 router.get("/profile", protect, (req, res) => {
     res.status(200).json({
         success: true,
@@ -19,4 +28,5 @@ router.get("/profile", protect, (req, res) => {
         }
     });
 });
+
 export default router;

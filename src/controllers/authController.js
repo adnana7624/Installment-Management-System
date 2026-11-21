@@ -3,11 +3,13 @@ import Admin from "../models/adminModel.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
+// ===============================
+// ADMIN LOGIN
+// ===============================
 export const loginAdmin = async (req, res) => {
     try {
         const { email, password } = req.body;
 
-        // Validate input
         if (!email || !password) {
             return res.status(400).json({
                 success: false,
@@ -15,7 +17,6 @@ export const loginAdmin = async (req, res) => {
             });
         }
 
-        // Find admin and include password field
         const admin = await Admin.findOne({
             email: email.trim().toLowerCase()
         }).select("+password");
@@ -27,7 +28,6 @@ export const loginAdmin = async (req, res) => {
             });
         }
 
-        // Check account status
         if (!admin.isActive) {
             return res.status(403).json({
                 success: false,
@@ -35,7 +35,6 @@ export const loginAdmin = async (req, res) => {
             });
         }
 
-        // Compare password
         const isPasswordCorrect = await bcrypt.compare(
             password,
             admin.password
@@ -44,11 +43,10 @@ export const loginAdmin = async (req, res) => {
         if (!isPasswordCorrect) {
             return res.status(401).json({
                 success: false,
-                message: "password is incorrect"
+                message: "Password is incorrect"
             });
         }
 
-        // Generate JWT
         const token = jwt.sign(
             { id: admin._id },
             process.env.JWT_SECRET,
@@ -69,6 +67,105 @@ export const loginAdmin = async (req, res) => {
 
     } catch (error) {
         console.error("Login error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error"
+        });
+    }
+};
+
+
+// ===============================
+// CHANGE ADMIN PASSWORD
+// ===============================
+export const changePassword = async (req, res) => {
+    try {
+        const {
+            currentPassword,
+            newPassword,
+            confirmPassword
+        } = req.body;
+
+        // Validate required fields
+        if (!currentPassword || !newPassword || !confirmPassword) {
+            return res.status(400).json({
+                success: false,
+                message: "Current password, new password and confirm password are required"
+            });
+        }
+
+        // Validate minimum password length
+        if (newPassword.length < 6) {
+            return res.status(400).json({
+                success: false,
+                message: "New password must be at least 6 characters long"
+            });
+        }
+
+        // Check new password confirmation
+        if (newPassword !== confirmPassword) {
+            return res.status(400).json({
+                success: false,
+                message: "New password and confirm password do not match"
+            });
+        }
+
+        // Find logged-in admin and include password
+        const admin = await Admin.findById(req.user._id).select("+password");
+
+        if (!admin) {
+            return res.status(404).json({
+                success: false,
+                message: "Admin account not found"
+            });
+        }
+
+        // Verify current password
+        const isCurrentPasswordCorrect = await bcrypt.compare(
+            currentPassword,
+            admin.password
+        );
+
+        if (!isCurrentPasswordCorrect) {
+            return res.status(400).json({
+                success: false,
+                message: "Current password is incorrect"
+            });
+        }
+
+        // Prevent using the same password
+        const isSamePassword = await bcrypt.compare(
+            newPassword,
+            admin.password
+        );
+
+        if (isSamePassword) {
+            return res.status(400).json({
+                success: false,
+                message: "New password must be different from current password"
+            });
+        }
+
+        // Hash new password
+        const salt = await bcrypt.genSalt(10);
+
+        const hashedPassword = await bcrypt.hash(
+            newPassword,
+            salt
+        );
+
+        // Save new password
+        admin.password = hashedPassword;
+        await admin.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Password changed successfully"
+        });
+
+    } catch (error) {
+        console.error("Change password error:", error);
 
         return res.status(500).json({
             success: false,

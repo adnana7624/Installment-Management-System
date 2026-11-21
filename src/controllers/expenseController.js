@@ -7,6 +7,7 @@ const validCategories = [
     "salary",
     "transport",
     "maintenance",
+    "discount",
     "other"
 ];
 

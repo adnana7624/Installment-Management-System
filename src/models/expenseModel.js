@@ -17,6 +17,7 @@ const expenseSchema = new mongoose.Schema(
                 "salary",
                 "transport",
                 "maintenance",
+                "discount",
                 "other"
             ],
             required: true

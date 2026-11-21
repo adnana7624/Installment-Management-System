@@ -12,6 +12,8 @@ import expenseRoutes from "./src/routes/expenseRoutes.js";
 import dashboardRoutes from "./src/routes/dashboardRoutes.js";
 import reportRoutes from "./src/routes/reportRoutes.js";
 import backupRoutes from "./src/routes/backupRoutes.js";
+import businessInfoRoutes from "./src/routes/businessInfoRoutes.js";
+
 
 
 dotenv.config();
@@ -29,6 +31,7 @@ app.use("/api/v1/expenses",expenseRoutes);
 app.use("/api/v1/dashboard",dashboardRoutes);
 app.use("/api/v1/reports",reportRoutes);
 app.use("/api/v1/backups", backupRoutes);
+app.use("/api/v1/business-info", businessInfoRoutes);
 
 
 app.get("/",(req , res) =>{

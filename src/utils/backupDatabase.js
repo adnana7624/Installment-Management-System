@@ -60,7 +60,7 @@ const backupDatabase = async () => {
         try {
             const cleanupResult = await cleanupOldBackups(
                 backupRoot,
-                30
+                10
             );
 
             deletedBackups = cleanupResult.deletedBackups;

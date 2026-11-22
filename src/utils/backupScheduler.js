@@ -7,17 +7,24 @@ import backupDatabase from "./backupDatabase.js";
 
 const backupRoot = process.env.BACKUP_PATH || "D:\\IMS_Backups";
 
-// Get the current local date in YYYY-MM-DD format
-const getLocalDateKey = (date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
+// Get Monday at 00:00 of the current week (local time)
+const getWeekStart = (date) => {
+    const weekStart = new Date(
+        date.getFullYear(),
+        date.getMonth(),
+        date.getDate()
+    );
 
-    return `${year}-${month}-${day}`;
+    const day = weekStart.getDay();
+    const daysSinceMonday = (day + 6) % 7;
+
+    weekStart.setDate(weekStart.getDate() - daysSinceMonday);
+
+    return weekStart;
 };
 
-// Check whether a successful backup already exists for this date
-const hasBackupToday = async () => {
+// Check whether a successful backup exists in the current week
+const hasBackupThisWeek = async () => {
     await fs.mkdir(backupRoot, { recursive: true });
 
     const databaseName = new URL(process.env.MONGO_URI)
@@ -29,7 +36,7 @@ const hasBackupToday = async () => {
         withFileTypes: true
     });
 
-    const today = getLocalDateKey(new Date());
+    const weekStart = getWeekStart(new Date());
 
     for (const folder of folders) {
         if (
@@ -42,8 +49,8 @@ const hasBackupToday = async () => {
         const folderPath = path.join(backupRoot, folder.name);
         const stats = await fs.stat(folderPath);
 
-        // Ignore backups created on a different local date
-        if (getLocalDateKey(stats.birthtime) !== today) {
+        // Ignore backups created before this week's Monday
+        if (stats.birthtime < weekStart) {
             continue;
         }
 
@@ -70,61 +77,53 @@ const hasBackupToday = async () => {
     return false;
 };
 
-const startBackupScheduler = async () => {
-
-    // Normal automatic backup at 11:00 PM
-    cron.schedule("0 23 * * *", async () => {
-        console.log("Starting automatic database backup...");
-
-        try {
-            const result = await backupDatabase();
-
-            console.log(
-                "Automatic backup completed:",
-                result.backupPath
-            );
-
-        } catch (error) {
-            console.error(
-                "Automatic backup failed:",
-                error.message
-            );
-        }
-    });
-
-    console.log("Daily backup scheduler started (11:00 PM)");
-
-    // Check for a missed backup whenever the backend starts
+// Create a backup only if this week does not already have one
+const createBackupIfNeeded = async (source) => {
     try {
-        const backupExists = await hasBackupToday();
+        const backupExists = await hasBackupThisWeek();
 
         if (backupExists) {
             console.log(
-                "A successful backup already exists for this date. Startup backup skipped."
+                `A successful backup already exists this week. ${source} backup skipped.`
             );
-
             return;
         }
 
-        console.log(
-            "No successful backup found for this date. Creating startup backup..."
-        );
+        console.log(`Starting ${source} database backup...`);
 
         const result = await backupDatabase();
 
         console.log(
-            "Startup backup completed successfully:",
+            `${source} backup completed successfully:`,
             result.backupPath
         );
 
     } catch (error) {
         console.error(
-            "Startup backup failed:",
+            `${source} backup failed:`,
             error.message
         );
-
-        // The backend can still start if backup fails
     }
+};
+
+const startBackupScheduler = async () => {
+    // Weekly backup: Every Monday at 10:00 AM Pakistan time
+    cron.schedule(
+        "0 10 * * 1",
+        async () => {
+            await createBackupIfNeeded("Scheduled weekly");
+        },
+        {
+            timezone: "Asia/Karachi"
+        }
+    );
+
+    console.log(
+        "Weekly backup scheduler started (Monday at 10:00 AM Pakistan time)."
+    );
+
+    // Startup backup: Create a backup if this week has none
+    await createBackupIfNeeded("Startup");
 };
 
 export default startBackupScheduler;

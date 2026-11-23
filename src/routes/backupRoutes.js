@@ -8,7 +8,9 @@ import {
     googleDriveCallback,
     testGoogleDriveConnection,
     uploadEncryptedTestBackup,
-    downloadAndVerifyTestBackup
+    downloadAndVerifyTestBackup,
+    restoreCloudBackupTest,
+    getCloudBackupHistory
 } from "../controllers/backupController.js";
 
 import { protect } from "../middleware/authMiddleware.js";
@@ -28,5 +30,14 @@ router.get("/google/test", protect, testGoogleDriveConnection);
 router.post("/google/upload-test",protect,uploadEncryptedTestBackup);
 
 router.get("/google/download-test/:fileId",protect,downloadAndVerifyTestBackup);
+
+// Restore actual encrypted cloud backup into a test database
+router.post(
+    "/google/restore-test/:fileId",
+    protect,
+    restoreCloudBackupTest
+);
+
+router.get("/google/backups", protect, getCloudBackupHistory);
 
 export default router;

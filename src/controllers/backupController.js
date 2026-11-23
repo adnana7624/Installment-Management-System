@@ -9,6 +9,17 @@ import {
     getGoogleDriveClient
     } from "../config/googleDrive.js";
 
+import os from "node:os";
+
+import downloadBackupFromGoogleDrive
+    from "../utils/downloadBackupFromGoogleDrive.js";
+
+import extractBackupArchive
+    from "../utils/extractBackupArchive.js";
+
+import restoreBackupToTestDatabase
+    from "../utils/restoreBackupToTestDatabase.js";
+
 const backupRoot = process.env.BACKUP_PATH || "D:\\IMS_Backups";
 
 import { Readable } from "node:stream";
@@ -329,6 +340,157 @@ export const downloadAndVerifyTestBackup = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Backup download or decryption failed.",
+            error: error.message
+        });
+    }
+};
+
+
+// Download and restore a real cloud backup into a test database
+export const restoreCloudBackupTest = async (req, res) => {
+    let temporaryPath = null;
+
+    try {
+        const { fileId } = req.params;
+
+        if (!fileId) {
+            return res.status(400).json({
+                success: false,
+                message: "Google Drive file ID is required."
+            });
+        }
+
+        // 1. Create a temporary working directory
+        temporaryPath = await fs.mkdtemp(
+            path.join(os.tmpdir(), "ims-cloud-restore-")
+        );
+
+        // 2. Download encrypted backup from Google Drive
+        const downloadResult =
+            await downloadBackupFromGoogleDrive(fileId);
+
+        // 3. Decrypt and extract backup
+        const extractionPath = path.join(
+            temporaryPath,
+            "extracted"
+        );
+
+        const extractionResult = await extractBackupArchive(
+            downloadResult.encryptedBuffer,
+            extractionPath
+        );
+
+        // 4. Restore into a separate test database
+        const restoreResult =
+            await restoreBackupToTestDatabase(extractionPath);
+
+        return res.status(200).json({
+            success: true,
+            message: "Cloud backup downloaded, decrypted, extracted and restored successfully.",
+            data: {
+                fileName: downloadResult.fileName,
+                encryptedSize: downloadResult.encryptedSize,
+                extraction: extractionResult,
+                restoration: restoreResult
+            }
+        });
+
+    } catch (error) {
+        console.error(
+            "Cloud backup restore test failed:",
+            error.message
+        );
+
+        return res.status(500).json({
+            success: false,
+            message: "Cloud backup restoration test failed.",
+            error: error.message
+        });
+
+    } finally {
+        // 5. Remove temporary extracted files
+        if (temporaryPath) {
+            try {
+                await fs.rm(temporaryPath, {
+                    recursive: true,
+                    force: true
+                });
+
+                console.log(
+                    "Temporary cloud restore files removed."
+                );
+
+            } catch (error) {
+                console.error(
+                    "Temporary folder cleanup failed:",
+                    error.message
+                );
+            }
+        }
+    }
+};
+
+
+// Get Cloud Backup History from Google Drive
+export const getCloudBackupHistory = async (req, res) => {
+    try {
+        const drive = await getGoogleDriveClient();
+
+        const folderName =
+            process.env.GOOGLE_DRIVE_FOLDER_NAME || "IMS_Backups";
+
+        // Find the IMS backup folder
+        const folderResponse = await drive.files.list({
+            q: `name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+            fields: "files(id, name)",
+            spaces: "drive"
+        });
+
+        const folder = folderResponse.data.files?.[0];
+
+        if (!folder) {
+            return res.status(200).json({
+                success: true,
+                message: "Google Drive backup folder not found.",
+                data: {
+                    totalBackups: 0,
+                    backups: []
+                }
+            });
+        }
+
+        // Get encrypted database backup files
+        const backupResponse = await drive.files.list({
+            q: `'${folder.id}' in parents and name contains 'IMS_Database_Backup_' and trashed = false`,
+            pageSize: 100,
+            orderBy: "createdTime desc",
+            fields: "nextPageToken, files(id, name, size, createdTime, mimeType)",
+            spaces: "drive"
+        });
+
+        const backups = (backupResponse.data.files || []).map((file) => ({
+            fileId: file.id,
+            fileName: file.name,
+            fileSize: Number(file.size || 0),
+            createdAt: file.createdTime,
+            mimeType: file.mimeType
+        }));
+
+        return res.status(200).json({
+            success: true,
+            message: "Cloud backup history fetched successfully.",
+            data: {
+                totalBackups: backups.length,
+                backups
+            }
+        });
+
+    } catch (error) {
+        console.error("Cloud backup history error:", error.message);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch cloud backup history.",
             error: error.message
         });
     }

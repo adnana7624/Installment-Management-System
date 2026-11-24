@@ -8,9 +8,30 @@ import cleanupOldBackups from "./cleanupOldBackups.js";
 import createBackupArchive from "./createBackupArchive.js";
 import uploadBackupToGoogleDrive from "./uploadBackupToGoogleDrive.js";
 
+import {
+    acquireBackupOperationLock
+} from "./backupOperationLock.js";
+
 const execFileAsync = promisify(execFile);
 
-const backupDatabase = async () => {
+const backupDatabase = async ({
+    lockAlreadyAcquired = false
+} = {}) => {
+
+    let operationLock = null;
+
+    // Acquire a lock unless the caller already owns one
+    if (!lockAlreadyAcquired) {
+        operationLock =
+            acquireBackupOperationLock("Database Backup");
+
+        if (!operationLock.acquired) {
+            throw new Error(
+                `Cannot start backup. ${operationLock.activeOperation} is already running.`
+            );
+        }
+    }
+
     let archivePath = null;
 
     try {
@@ -47,11 +68,29 @@ const backupDatabase = async () => {
             .pathname
             .replace(/^\/+/, "")
             .split("/")[0];
+        
+        if (
+            databaseName !== "Installment_Management_System"
+        ) {
+            throw new Error(
+                "Backup rejected: unexpected MongoDB database name."
+            );
+        }
 
         const databaseBackupPath = path.join(
             backupPath,
             databaseName
         );
+
+        const requiredCollections = [
+            "admins",
+            "businessinfos",
+            "counters",
+            "customers",
+            "expenses",
+            "installments",
+            "payments"
+        ];
 
         const backupFiles = await fs.readdir(
             databaseBackupPath
@@ -61,15 +100,26 @@ const backupDatabase = async () => {
             file.endsWith(".bson")
         );
 
-        if (bsonFiles.length === 0) {
+        const missingCollections = requiredCollections.filter(
+            collectionName =>
+                !backupFiles.includes(`${collectionName}.bson`)
+        );
+
+        if (missingCollections.length > 0) {
             throw new Error(
-                "Local backup verification failed. No BSON files found."
+                `Local backup verification failed. Missing collections: ${missingCollections.join(", ")}`
             );
         }
 
         console.log(
-            "Local MongoDB backup verified successfully."
+            "Local MongoDB backup verified successfully.",
+            {
+                collectionCount: bsonFiles.length,
+                collections: bsonFiles
+            }
         );
+
+        
 
         // 4. Prepare separate Google Drive backup status
         let cloudBackup = {
@@ -158,7 +208,8 @@ const backupDatabase = async () => {
         try {
             const cleanupResult = await cleanupOldBackups(
                 backupRoot,
-                10
+                10,
+                [backupPath]
             );
 
             deletedBackups = cleanupResult.deletedBackups;
@@ -190,6 +241,10 @@ const backupDatabase = async () => {
         throw new Error(
             `Database backup failed: ${error.message}`
         );
+
+    } finally {
+        // Release only the lock acquired by this function
+        operationLock?.release();
     }
 };
 

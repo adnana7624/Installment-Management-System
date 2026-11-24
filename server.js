@@ -14,6 +14,9 @@ import reportRoutes from "./src/routes/reportRoutes.js";
 import backupRoutes from "./src/routes/backupRoutes.js";
 import businessInfoRoutes from "./src/routes/businessInfoRoutes.js";
 
+import {
+    maintenanceMiddleware
+} from "./src/middleware/maintenanceMode.js";
 
 
 dotenv.config();
@@ -23,6 +26,8 @@ app.use(cors({
     origin: "http://localhost:5173"
 }));
 app.use(express.json());
+
+app.use(maintenanceMiddleware);
 
 app.use("/api/v1/auth" , authRoutes)
 app.use("/api/v1/installments",installmentRoutes)

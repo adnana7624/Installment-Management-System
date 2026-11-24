@@ -10,7 +10,10 @@ import {
     uploadEncryptedTestBackup,
     downloadAndVerifyTestBackup,
     restoreCloudBackupTest,
-    getCloudBackupHistory
+    getCloudBackupHistory,
+    restoreCloudBackupLive,
+    downloadCloudBackup,
+    
 } from "../controllers/backupController.js";
 
 import { protect } from "../middleware/authMiddleware.js";
@@ -39,5 +42,19 @@ router.post(
 );
 
 router.get("/google/backups", protect, getCloudBackupHistory);
+
+router.post(
+    "/google/restore-live/:fileId",
+    protect,
+    restoreCloudBackupLive
+);
+
+router.get(
+    "/google/download/:fileId",
+    protect,
+    downloadCloudBackup
+);
+
+
 
 export default router;

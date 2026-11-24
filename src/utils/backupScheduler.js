@@ -5,113 +5,240 @@ import path from "node:path";
 
 import backupDatabase from "./backupDatabase.js";
 
-const backupRoot = process.env.BACKUP_PATH || "D:\\IMS_Backups";
+import {
+    isMaintenanceMode
+} from "../middleware/maintenanceMode.js";
 
-// Get Monday at 00:00 of the current week (local time)
-const getWeekStart = (date) => {
-    const weekStart = new Date(
-        date.getFullYear(),
-        date.getMonth(),
-        date.getDate()
+const backupRoot =
+    process.env.BACKUP_PATH || "D:\\IMS_Backups";
+
+const requiredCollections = [
+    "admins",
+    "businessinfos",
+    "counters",
+    "customers",
+    "expenses",
+    "installments",
+    "payments"
+];
+
+// Convert backup folder name into a Date.
+const getBackupDate = (folderName) => {
+    const match = folderName.match(
+        /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/
     );
 
-    const day = weekStart.getDay();
-    const daysSinceMonday = (day + 6) % 7;
+    if (!match) {
+        return null;
+    }
 
-    weekStart.setDate(weekStart.getDate() - daysSinceMonday);
+    const [, date, hours, minutes, seconds, milliseconds] =
+        match;
 
-    return weekStart;
+    return new Date(
+        `${date}T${hours}:${minutes}:${seconds}.${milliseconds}Z`
+    );
 };
 
-// Check whether a successful backup exists in the current week
-const hasBackupThisWeek = async () => {
-    await fs.mkdir(backupRoot, { recursive: true });
+// Calculate the start of the current week in Pakistan time.
+const getPakistanWeekStart = () => {
+    const now = new Date();
 
-    const databaseName = new URL(process.env.MONGO_URI)
-        .pathname
-        .replace(/^\/+/, "")
-        .split("/")[0];
+    // Pakistan uses UTC+5.
+    const pakistanTime = new Date(
+        now.getTime() + 5 * 60 * 60 * 1000
+    );
 
-    const folders = await fs.readdir(backupRoot, {
-        withFileTypes: true
-    });
+    const day = pakistanTime.getUTCDay();
 
-    const weekStart = getWeekStart(new Date());
+    // Monday = 0, Sunday = 6.
+    const daysSinceMonday = (day + 6) % 7;
 
-    for (const folder of folders) {
-        if (
-            !folder.isDirectory() ||
-            !/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/.test(folder.name)
-        ) {
-            continue;
+    const mondayMidnightPakistan = Date.UTC(
+        pakistanTime.getUTCFullYear(),
+        pakistanTime.getUTCMonth(),
+        pakistanTime.getUTCDate() - daysSinceMonday,
+        0,
+        0,
+        0,
+        0
+    );
+
+    // Convert Pakistan midnight back to UTC.
+    return mondayMidnightPakistan -
+        5 * 60 * 60 * 1000;
+};
+
+// Check that a backup folder contains all required BSON files.
+const isCompleteBackup = async (folderPath) => {
+    try {
+        const databaseName = new URL(
+            process.env.MONGO_URI
+        ).pathname.replace(/^\/+/, "").split("/")[0];
+
+        if (!databaseName) {
+            return false;
         }
 
-        const folderPath = path.join(backupRoot, folder.name);
-        const stats = await fs.stat(folderPath);
-
-        // Ignore backups created before this week's Monday
-        if (stats.birthtime < weekStart) {
-            continue;
-        }
-
-        const databaseBackupPath = path.join(
+        const databasePath = path.join(
             folderPath,
             databaseName
         );
 
-        try {
-            const files = await fs.readdir(databaseBackupPath);
-
-            const bsonFiles = files.filter(file =>
-                file.endsWith(".bson")
+        for (const collectionName of requiredCollections) {
+            const bsonPath = path.join(
+                databasePath,
+                `${collectionName}.bson`
             );
 
-            if (bsonFiles.length > 0) {
-                return true;
-            }
-        } catch {
-            // Ignore incomplete or invalid backup folders
-        }
-    }
+            const stats = await fs.stat(bsonPath);
 
-    return false;
+            if (!stats.isFile()) {
+                return false;
+            }
+        }
+
+        return true;
+
+    } catch {
+        return false;
+    }
 };
 
-// Create a backup only if this week does not already have one
-const createBackupIfNeeded = async (source) => {
+// Find whether a complete backup already exists this week.
+const hasSuccessfulBackupThisWeek = async () => {
     try {
-        const backupExists = await hasBackupThisWeek();
+        await fs.mkdir(backupRoot, {
+            recursive: true
+        });
 
-        if (backupExists) {
-            console.log(
-                `A successful backup already exists this week. ${source} backup skipped.`
+        const folders = await fs.readdir(
+            backupRoot,
+            { withFileTypes: true }
+        );
+
+        const weekStart = getPakistanWeekStart();
+        const now = Date.now();
+
+        for (const folder of folders) {
+            if (!folder.isDirectory()) {
+                continue;
+            }
+
+            const backupDate = getBackupDate(
+                folder.name
             );
-            return;
+
+            if (!backupDate) {
+                continue;
+            }
+
+            const backupTime = backupDate.getTime();
+
+            if (
+                backupTime < weekStart ||
+                backupTime > now
+            ) {
+                continue;
+            }
+
+            const folderPath = path.join(
+                backupRoot,
+                folder.name
+            );
+
+            if (await isCompleteBackup(folderPath)) {
+                return true;
+            }
         }
 
-        console.log(`Starting ${source} database backup...`);
-
-        const result = await backupDatabase();
-
-        console.log(
-            `${source} backup completed successfully:`,
-            result.backupPath
-        );
+        return false;
 
     } catch (error) {
         console.error(
-            `${source} backup failed:`,
+            "Could not check existing weekly backups:",
             error.message
         );
+
+        return false;
     }
 };
 
+// Start weekly backup scheduler.
 const startBackupScheduler = async () => {
-    // Weekly backup: Every Monday at 10:00 AM Pakistan time
-    cron.schedule(
+
+    // 1. Check persistent maintenance mode first.
+    if (isMaintenanceMode()) {
+        console.log(
+            "Startup backup skipped because the application is in maintenance mode."
+        );
+    } else {
+        // 2. Run startup backup only if no successful backup
+        // exists in the current Pakistan calendar week.
+        try {
+            const backupExists =
+                await hasSuccessfulBackupThisWeek();
+
+            if (backupExists) {
+                console.log(
+                    "A successful backup already exists this week. Startup backup skipped."
+                );
+            } else if (isMaintenanceMode()) {
+                console.log(
+                    "Startup backup skipped because maintenance mode is active."
+                );
+            } else {
+                console.log(
+                    "No successful backup found this week. Starting startup backup..."
+                );
+
+                await backupDatabase();
+
+                console.log(
+                    "Startup backup completed."
+                );
+            }
+
+        } catch (error) {
+            console.error(
+                "Startup backup failed:",
+                error.message
+            );
+        }
+    }
+
+    // 3. Schedule weekly backup.
+    // Every Monday at 10:00 AM Pakistan time.
+    const task = cron.schedule(
         "0 10 * * 1",
         async () => {
-            await createBackupIfNeeded("Scheduled weekly");
+
+            // Check maintenance mode before scheduled backup.
+            if (isMaintenanceMode()) {
+                console.log(
+                    "Scheduled backup skipped because the application is in maintenance mode."
+                );
+
+                return;
+            }
+
+            try {
+                console.log(
+                    "Starting scheduled weekly database backup..."
+                );
+
+                await backupDatabase();
+
+                console.log(
+                    "Scheduled weekly database backup completed."
+                );
+
+            } catch (error) {
+                console.error(
+                    "Scheduled weekly database backup failed:",
+                    error.message
+                );
+            }
         },
         {
             timezone: "Asia/Karachi"
@@ -122,8 +249,7 @@ const startBackupScheduler = async () => {
         "Weekly backup scheduler started (Monday at 10:00 AM Pakistan time)."
     );
 
-    // Startup backup: Create a backup if this week has none
-    await createBackupIfNeeded("Startup");
+    return task;
 };
 
 export default startBackupScheduler;

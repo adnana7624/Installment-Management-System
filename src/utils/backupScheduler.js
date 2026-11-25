@@ -12,6 +12,9 @@ import {
 const backupRoot =
     process.env.BACKUP_PATH || "D:\\IMS_Backups";
 
+const expectedDatabaseName =
+    "Installment_Management_System";
+
 const requiredCollections = [
     "admins",
     "businessinfos",
@@ -69,14 +72,26 @@ const getPakistanWeekStart = () => {
         5 * 60 * 60 * 1000;
 };
 
-// Check that a backup folder contains all required BSON files.
+// Check that a backup folder contains all required,
+// non-empty BSON files.
 const isCompleteBackup = async (folderPath) => {
     try {
-        const databaseName = new URL(
-            process.env.MONGO_URI
-        ).pathname.replace(/^\/+/, "").split("/")[0];
+        const mongoUri = process.env.MONGO_URI;
 
-        if (!databaseName) {
+        if (!mongoUri) {
+            return false;
+        }
+
+        const databaseName = new URL(
+            mongoUri
+        ).pathname
+            .replace(/^\/+/, "")
+            .split("/")[0];
+
+        // Verify the expected IMS database.
+        if (
+            databaseName !== expectedDatabaseName
+        ) {
             return false;
         }
 
@@ -93,7 +108,12 @@ const isCompleteBackup = async (folderPath) => {
 
             const stats = await fs.stat(bsonPath);
 
-            if (!stats.isFile()) {
+            // File must exist, be a regular file,
+            // and contain data.
+            if (
+                !stats.isFile() ||
+                stats.size === 0
+            ) {
                 return false;
             }
         }
@@ -173,8 +193,9 @@ const startBackupScheduler = async () => {
             "Startup backup skipped because the application is in maintenance mode."
         );
     } else {
-        // 2. Run startup backup only if no successful backup
-        // exists in the current Pakistan calendar week.
+
+        // 2. Run startup backup only if no successful
+        // backup exists in the current Pakistan calendar week.
         try {
             const backupExists =
                 await hasSuccessfulBackupThisWeek();
@@ -183,10 +204,12 @@ const startBackupScheduler = async () => {
                 console.log(
                     "A successful backup already exists this week. Startup backup skipped."
                 );
+
             } else if (isMaintenanceMode()) {
                 console.log(
                     "Startup backup skipped because maintenance mode is active."
                 );
+
             } else {
                 console.log(
                     "No successful backup found this week. Starting startup backup..."

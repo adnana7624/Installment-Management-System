@@ -5,18 +5,22 @@ const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
 
-const encryptBackup = (inputBuffer) => {
-    // Validate input.
-    if (
-        !Buffer.isBuffer(inputBuffer) ||
-        inputBuffer.length === 0
-    ) {
-        throw new Error(
-            "Backup input must be a non-empty Buffer."
-        );
+const getEncryptionKey = (masterKey = null) => {
+    // Use an explicitly supplied master key during recovery.
+    if (masterKey !== null) {
+        if (
+            !Buffer.isBuffer(masterKey) ||
+            masterKey.length !== 32
+        ) {
+            throw new Error(
+                "Master encryption key must be a 32-byte Buffer."
+            );
+        }
+
+        return masterKey;
     }
 
-    // Validate encryption key.
+    // Preserve compatibility with existing backups.
     const keyHex = process.env.BACKUP_ENCRYPTION_KEY;
 
     if (
@@ -28,9 +32,21 @@ const encryptBackup = (inputBuffer) => {
         );
     }
 
-    const key = Buffer.from(keyHex, "hex");
+    return Buffer.from(keyHex, "hex");
+};
 
-    // Generate a unique random IV for every encryption.
+const encryptBackup = (inputBuffer, masterKey = null) => {
+    if (
+        !Buffer.isBuffer(inputBuffer) ||
+        inputBuffer.length === 0
+    ) {
+        throw new Error(
+            "Backup input must be a non-empty Buffer."
+        );
+    }
+
+    const key = getEncryptionKey(masterKey);
+
     const iv = crypto.randomBytes(IV_LENGTH);
 
     const cipher = crypto.createCipheriv(
@@ -44,11 +60,10 @@ const encryptBackup = (inputBuffer) => {
         cipher.final()
     ]);
 
-    // Generate authentication tag.
     const authTag = cipher.getAuthTag();
 
-    // File format:
-    // 12-byte IV + 16-byte Auth Tag + Encrypted Data.
+    // Preserve the existing file format:
+    // IV + Authentication Tag + Encrypted Data.
     return Buffer.concat([
         iv,
         authTag,

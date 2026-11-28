@@ -40,6 +40,8 @@ import {
     waitForActiveRequests
 } from "../middleware/maintenanceMode.js";
 
+import verifyRestoredTestDatabase
+    from "../utils/verifyRestoredTestDatabase.js";
 
 import encryptBackup from "../utils/encryptBackup.js";
 import decryptBackup from "../utils/decryptBackup.js";

@@ -19,7 +19,7 @@ const extractBackupArchive = async (
         // 1. Validate input.
         if (
             !Buffer.isBuffer(encryptedBuffer) ||
-            encryptedBuffer.length < 28
+            encryptedBuffer.length < 29
         ) {
             throw new Error(
                 "Invalid encrypted backup data."
@@ -32,9 +32,12 @@ const extractBackupArchive = async (
             );
         }
 
-        if (!extractionPath) {
+        if (
+            typeof extractionPath !== "string" ||
+            !extractionPath.trim()
+        ) {
             throw new Error(
-                "Extraction directory is required."
+                "Valid extraction directory is required."
             );
         }
 
@@ -53,13 +56,20 @@ const extractBackupArchive = async (
         );
 
         // 4. Check entry count.
-        if (directory.files.length > MAX_ENTRIES) {
+        if (
+            directory.files.length === 0 ||
+            directory.files.length > MAX_ENTRIES
+        ) {
             throw new Error(
-                "ZIP archive contains too many entries."
+                "ZIP archive has an invalid number of entries."
             );
         }
 
         // 5. Validate all entries before extraction.
+        const absoluteExtractionPath = path.resolve(
+            extractionPath
+        );
+
         const validatedEntries = [];
         const usedPaths = new Set();
 
@@ -72,7 +82,7 @@ const extractBackupArchive = async (
                 !entryPath ||
                 entryPath.includes("\\") ||
                 entryPath.includes("\0") ||
-                path.isAbsolute(entryPath) ||
+                path.posix.isAbsolute(entryPath) ||
                 /^[a-zA-Z]:/.test(entryPath)
             ) {
                 throw new Error(
@@ -96,12 +106,12 @@ const extractBackupArchive = async (
             }
 
             const outputPath = path.resolve(
-                extractionPath,
+                absoluteExtractionPath,
                 ...normalizedSegments
             );
 
             const relativePath = path.relative(
-                extractionPath,
+                absoluteExtractionPath,
                 outputPath
             );
 
@@ -148,8 +158,9 @@ const extractBackupArchive = async (
                 continue;
             }
 
+            // Read uncompressed size from ZIP metadata.
             const fileSize = Number(
-                entry.uncompressedSize
+                entry.vars?.uncompressedSize
             );
 
             if (
@@ -187,10 +198,6 @@ const extractBackupArchive = async (
         }
 
         // 6. Create extraction directory.
-        const absoluteExtractionPath = path.resolve(
-            extractionPath
-        );
-
         await fs.mkdir(absoluteExtractionPath, {
             recursive: true
         });
@@ -223,6 +230,7 @@ const extractBackupArchive = async (
                 );
             }
 
+            // Prevent overwriting existing files.
             await fs.writeFile(
                 item.outputPath,
                 fileBuffer,
